@@ -24,7 +24,8 @@ pub use dioxus_native_dom::*;
 
 pub use anyrender_vello::{CustomPaintCtx, CustomPaintSource, DeviceHandle, TextureHandle};
 use assets::DioxusNativeNetProvider;
-pub use dioxus_application::{DioxusNativeApplication, DioxusNativeEvent};
+pub use contexts::NativeContext;
+pub use dioxus_application::{CreateWindowEvent, DioxusNativeApplication, DioxusNativeEvent};
 pub use dioxus_renderer::{DioxusNativeWindowRenderer, Features, Limits};
 
 #[cfg(not(all(target_os = "ios", target_abi = "sim")))]

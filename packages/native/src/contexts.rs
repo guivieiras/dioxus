@@ -4,6 +4,36 @@ use winit::{event_loop::EventLoopProxy, window::WindowId};
 
 use crate::DioxusNativeEvent;
 
+/// Public context providing access to the event loop proxy.
+/// This allows components to send custom events to the application.
+#[derive(Clone)]
+pub struct NativeContext {
+    proxy: EventLoopProxy<BlitzShellEvent>,
+    window_id: WindowId,
+}
+
+impl NativeContext {
+    /// Create a new NativeContext
+    pub fn new(proxy: EventLoopProxy<BlitzShellEvent>, window_id: WindowId) -> Self {
+        Self { proxy, window_id }
+    }
+
+    /// Get a clone of the event loop proxy
+    pub fn proxy(&self) -> EventLoopProxy<BlitzShellEvent> {
+        self.proxy.clone()
+    }
+
+    /// Get the window ID
+    pub fn window_id(&self) -> WindowId {
+        self.window_id
+    }
+
+    /// Send a custom event to the event loop
+    pub fn send_event<T: std::any::Any + Send + Sync + 'static>(&self, event: T) -> Result<(), winit::event_loop::EventLoopClosed<BlitzShellEvent>> {
+        self.proxy.send_event(BlitzShellEvent::embedder_event(event))
+    }
+}
+
 pub struct DioxusNativeDocument {
     pub(crate) proxy: EventLoopProxy<BlitzShellEvent>,
     pub(crate) window: WindowId,

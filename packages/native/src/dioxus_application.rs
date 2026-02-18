@@ -56,8 +56,13 @@ pub struct DioxusNativeApplication {
 
 fn window_debug_enabled() -> bool {
     env::var("PINGO_WINDOW_DEBUG")
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
-        .unwrap_or(false)
+        .map(|value| {
+            !matches!(
+                value.as_str(),
+                "0" | "false" | "FALSE" | "no" | "NO" | "off" | "OFF"
+            )
+        })
+        .unwrap_or(true)
 }
 
 fn window_debug(message: impl AsRef<str>) {

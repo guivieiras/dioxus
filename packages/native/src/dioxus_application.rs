@@ -51,6 +51,7 @@ unsafe impl Sync for CreateWindowEvent {}
 pub struct DioxusNativeApplication {
     pending_window: Option<WindowConfig<DioxusNativeWindowRenderer>>,
     pending_window_closes: Vec<WindowId>,
+    retained_closed_windows: Vec<View<DioxusNativeWindowRenderer>>,
     inner: BlitzApplication<DioxusNativeWindowRenderer>,
     proxy: EventLoopProxy<BlitzShellEvent>,
 }
@@ -80,6 +81,7 @@ impl DioxusNativeApplication {
         Self {
             pending_window: Some(config),
             pending_window_closes: Vec::new(),
+            retained_closed_windows: Vec::new(),
             inner: BlitzApplication::new(proxy.clone()),
             proxy,
         }
@@ -109,7 +111,14 @@ impl DioxusNativeApplication {
                 "deferred window close: id={window_id:?}, removed={}, windows_before={before}, windows_after={after}",
                 removed.is_some()
             ));
-            drop(removed);
+            if let Some(view) = removed {
+                // Keep closed windows alive for now to avoid teardown-time crashes.
+                self.retained_closed_windows.push(view);
+                window_debug(format!(
+                    "retained closed windows={}",
+                    self.retained_closed_windows.len()
+                ));
+            }
         }
 
         if self.inner.windows.is_empty() {

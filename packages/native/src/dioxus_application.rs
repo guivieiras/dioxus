@@ -193,6 +193,17 @@ impl ApplicationHandler<BlitzShellEvent> for DioxusNativeApplication {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        if matches!(event, WindowEvent::CloseRequested | WindowEvent::Destroyed) {
+            // Some compositors can destroy windows without first sending CloseRequested.
+            // Drop our view entry for both events so stale windows aren't polled/redrawn.
+            let removed = self.inner.windows.remove(&window_id);
+            drop(removed);
+            if self.inner.windows.is_empty() {
+                event_loop.exit();
+            }
+            return;
+        }
+
         self.inner.window_event(event_loop, window_id, event);
     }
 

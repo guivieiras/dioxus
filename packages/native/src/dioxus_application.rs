@@ -50,6 +50,7 @@ unsafe impl Sync for CreateWindowEvent {}
 
 pub struct DioxusNativeApplication {
     pending_window: Option<WindowConfig<DioxusNativeWindowRenderer>>,
+    pending_window_closes: Vec<WindowId>,
     inner: BlitzApplication<DioxusNativeWindowRenderer>,
     proxy: EventLoopProxy<BlitzShellEvent>,
 }
@@ -78,6 +79,7 @@ impl DioxusNativeApplication {
     ) -> Self {
         Self {
             pending_window: Some(config),
+            pending_window_closes: Vec::new(),
             inner: BlitzApplication::new(proxy.clone()),
             proxy,
         }
@@ -85,6 +87,35 @@ impl DioxusNativeApplication {
 
     pub fn add_window(&mut self, window_config: WindowConfig<DioxusNativeWindowRenderer>) {
         self.inner.add_window(window_config);
+    }
+
+    fn queue_window_close(&mut self, window_id: WindowId) {
+        if !self.pending_window_closes.contains(&window_id) {
+            self.pending_window_closes.push(window_id);
+        }
+    }
+
+    fn flush_pending_window_closes(&mut self, event_loop: &ActiveEventLoop) {
+        if self.pending_window_closes.is_empty() {
+            return;
+        }
+
+        let pending = std::mem::take(&mut self.pending_window_closes);
+        for window_id in pending {
+            let before = self.inner.windows.len();
+            let removed = self.inner.windows.remove(&window_id);
+            let after = self.inner.windows.len();
+            window_debug(format!(
+                "deferred window close: id={window_id:?}, removed={}, windows_before={before}, windows_after={after}",
+                removed.is_some()
+            ));
+            drop(removed);
+        }
+
+        if self.inner.windows.is_empty() {
+            window_debug("window map is empty after deferred close, exiting event loop");
+            event_loop.exit();
+        }
     }
 
     fn handle_blitz_shell_event(
@@ -209,6 +240,7 @@ impl ApplicationHandler<BlitzShellEvent> for DioxusNativeApplication {
     }
 
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        self.flush_pending_window_closes(event_loop);
         self.inner.new_events(event_loop, cause);
     }
 
@@ -224,20 +256,12 @@ impl ApplicationHandler<BlitzShellEvent> for DioxusNativeApplication {
             } else {
                 "Destroyed"
             };
-            let before = self.inner.windows.len();
-            // Some compositors can destroy windows without first sending CloseRequested.
-            // Drop our view entry for both events so stale windows aren't polled/redrawn.
-            let removed = self.inner.windows.remove(&window_id);
-            let after = self.inner.windows.len();
             window_debug(format!(
-                "window event: kind={close_kind}, id={window_id:?}, removed={}, windows_before={before}, windows_after={after}",
-                removed.is_some()
+                "window event: kind={close_kind}, id={window_id:?}, queueing deferred close, windows_current={}",
+                self.inner.windows.len()
             ));
-            drop(removed);
-            if self.inner.windows.is_empty() {
-                window_debug("window map is empty, exiting event loop");
-                event_loop.exit();
-            }
+            self.queue_window_close(window_id);
+            let _ = self.proxy.send_event(BlitzShellEvent::Poll { window_id });
             return;
         }
 
@@ -245,6 +269,7 @@ impl ApplicationHandler<BlitzShellEvent> for DioxusNativeApplication {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: BlitzShellEvent) {
+        self.flush_pending_window_closes(event_loop);
         match event {
             BlitzShellEvent::Embedder(ref arc_event) => {
                 // Check for CreateWindowEvent first

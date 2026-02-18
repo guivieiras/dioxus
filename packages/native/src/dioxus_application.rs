@@ -1,6 +1,7 @@
 use blitz_shell::{BlitzApplication, View, WindowConfig};
 use dioxus_core::{provide_context, Element, ScopeId, VirtualDom};
 use dioxus_history::{History, MemoryHistory};
+use std::env;
 use std::rc::Rc;
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
@@ -51,6 +52,18 @@ pub struct DioxusNativeApplication {
     pending_window: Option<WindowConfig<DioxusNativeWindowRenderer>>,
     inner: BlitzApplication<DioxusNativeWindowRenderer>,
     proxy: EventLoopProxy<BlitzShellEvent>,
+}
+
+fn window_debug_enabled() -> bool {
+    env::var("PINGO_WINDOW_DEBUG")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+        .unwrap_or(false)
+}
+
+fn window_debug(message: impl AsRef<str>) {
+    if window_debug_enabled() {
+        eprintln!("[window-debug] {}", message.as_ref());
+    }
 }
 
 impl DioxusNativeApplication {
@@ -174,6 +187,10 @@ impl ApplicationHandler<BlitzShellEvent> for DioxusNativeApplication {
 
             // todo(jon): we should actually mess with the pending windows instead of passing along the contexts
             self.inner.windows.insert(window_id, window);
+            window_debug(format!(
+                "initial window inserted: id={window_id:?}, total_windows={}",
+                self.inner.windows.len()
+            ));
         }
 
         self.inner.resumed(event_loop);
@@ -193,12 +210,24 @@ impl ApplicationHandler<BlitzShellEvent> for DioxusNativeApplication {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        if matches!(event, WindowEvent::CloseRequested | WindowEvent::Destroyed) {
+        if matches!(&event, WindowEvent::CloseRequested | WindowEvent::Destroyed) {
+            let close_kind = if matches!(&event, WindowEvent::CloseRequested) {
+                "CloseRequested"
+            } else {
+                "Destroyed"
+            };
+            let before = self.inner.windows.len();
             // Some compositors can destroy windows without first sending CloseRequested.
             // Drop our view entry for both events so stale windows aren't polled/redrawn.
             let removed = self.inner.windows.remove(&window_id);
+            let after = self.inner.windows.len();
+            window_debug(format!(
+                "window event: kind={close_kind}, id={window_id:?}, removed={}, windows_before={before}, windows_after={after}",
+                removed.is_some()
+            ));
             drop(removed);
             if self.inner.windows.is_empty() {
+                window_debug("window map is empty, exiting event loop");
                 event_loop.exit();
             }
             return;
@@ -215,6 +244,7 @@ impl ApplicationHandler<BlitzShellEvent> for DioxusNativeApplication {
 
                     // Create the VirtualDom from the app function
                     let vdom = VirtualDom::new(create_event.app);
+                    let requested_title = create_event.window_attributes.title.clone();
 
                     // Set up providers for asset loading
                     let net_provider = Some(DioxusNativeNetProvider::shared(self.proxy.clone()));
@@ -292,6 +322,10 @@ impl ApplicationHandler<BlitzShellEvent> for DioxusNativeApplication {
 
                     // Add to windows map
                     self.inner.windows.insert(window_id, window);
+                    window_debug(format!(
+                        "dynamic window inserted: id={window_id:?}, requested_title={requested_title:?}, total_windows={}",
+                        self.inner.windows.len()
+                    ));
 
                     return;
                 }
